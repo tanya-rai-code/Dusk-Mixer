@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dusk Mixer</title>
+
+  <!-- LOOKS -->
+  <style>
+    :root {
+      --ink: #141414;
+      --paper: #eceff1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 18px 48px;
+      display: flex;
+      justify-content: center;
+      color: var(--ink);
+      background-color: var(--paper);
+      transition: background-color 1.2s ease;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+    main { width: 100%; max-width: 440px; }
+    h1 {
+      margin: 0 0 10px;
+      font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
+      font-size: 2.7rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+    .intro { margin: 0 0 26px; line-height: 1.5; color: #353a3f; }
+
+    button { font: inherit; color: inherit; cursor: pointer; }
+    :focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+    #play {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      margin-bottom: 30px;
+      font-size: 1.15rem;
+      font-weight: 800;
+      background: #fff;
+      border: 3px solid var(--ink);
+      border-radius: 4px;
+      box-shadow: 5px 5px 0 var(--ink);
+    }
+    #play:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--ink); }
+    #play.on { background: var(--ink); color: #fff; }
+
+    .channel {
+      margin-bottom: 22px;
+      padding: 14px 16px 8px;
+      border: 3px solid var(--ink);
+      border-radius: 4px;
+      box-shadow: 5px 5px 0 var(--ink);
+    }
+    .channel-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .channel-name { font-size: 1.35rem; font-weight: 800; }
+    .channel-note { font-size: 0.9rem; opacity: 0.9; text-align: right; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 34px;
+      margin: 8px 0 4px;
+      background: transparent;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 12px; background: var(--ink); border-radius: 2px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 30px; height: 30px; margin-top: -9px;
+      background: #fff; border: 3px solid var(--ink); border-radius: 2px;
+    }
+    input[type="range"]::-moz-range-track {
+      height: 12px; background: var(--ink); border-radius: 2px;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 24px; height: 24px;
+      background: #fff; border: 3px solid var(--ink); border-radius: 2px;
+    }
+
+    h2 { margin: 34px 0 10px; font-size: 1.05rem; font-weight: 800; }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+    .pill {
+      padding: 9px 15px;
+      font-weight: 600;
+      background: #fff;
+      border: 2px solid var(--ink);
+      border-radius: 4px;
+    }
+    .pill.on { background: var(--ink); color: #fff; }
+    #timeLeft { margin: 10px 0 0; min-height: 1.4em; font-weight: 600; }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Dusk Mixer</h1>
+    <p class="intro">Build your own background sound for sleeping, reading, or focus. Everything you hear is generated live in your browser. There are no audio files.</p>
+
+    <button id="play">Play</button>
+    <div id="channels"></div>
+
+    <h2>Presets</h2>
+    <div class="pills" id="presets"></div>
+
+    <h2>Sleep timer</h2>
+    <div class="pills" id="timers"></div>
+    <p id="timeLeft"></p>
+  </main>
+
+  <script>
+    const CHANNELS = [
+      { id: "rain",  name: "Rain",  note: "Soft, steady patter", color: [47, 75, 214],  ink: "#fff",    trim: 0.25 },
+      { id: "wind",  name: "Wind",  note: "Slow gusts",          color: [232, 185, 35], ink: "#141414", trim: 2.5 },
+      { id: "waves", name: "Waves", note: "Rolling in and out",  color: [10, 128, 115], ink: "#fff",    trim: 2.0 },
+      { id: "fire",  name: "Fire",  note: "Rumble and crackle",  color: [214, 60, 36],  ink: "#fff",    trim: 1.6 }
+    ];
+
+    const PRESETS = {
+      Storm:  { rain: 0.8, wind: 0.6, waves: 0,   fire: 0 },
+      Cabin:  { rain: 0.4, wind: 0.15, waves: 0,  fire: 0.7 },
+      Beach:  { rain: 0,   wind: 0.3, waves: 0.8, fire: 0 },
+      Quiet:  { rain: 0.2, wind: 0.1, waves: 0.1, fire: 0 }
+    };
+
+    const BASE_SKY = [236, 239, 241];
+
+    let ctx = null;
+    let master = null;
+    let playing = false;
+    const gains = {};
+    let levels = loadLevels();
+
+    function loadLevels() {
+      try {
+        return JSON.parse(localStorage.getItem("dusk-levels")) ||
+               { rain: 0.5, wind: 0.2, waves: 0, fire: 0 };
+      } catch (e) {
+        return { rain: 0.5, wind: 0.2, waves: 0, fire: 0 };
+      }
+    }
+    function saveLevels() {
+      try { localStorage.setItem("dusk-levels", JSON.stringify(levels)); } catch (e) {}
+    }
+
+    function noiseBuffer(kind) {
+      const length = ctx.sampleRate * 4;
+      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        if (kind === "brown") {
+          last = (last + 0.02 * white) / 1.02;
+          data[i] = last * 3.5;
+        } else {
+          data[i] = white;
+        }
+      }
+      return buffer;
+    }
+
+    function loop(buffer) {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.start();
+      return source;
+    }
+
+    function filter(type, frequency, q) {
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.frequency.value = frequency;
+      if (q) f.Q.value = q;
+      return f;
+    }
+
+    function wobble(speedHz, amount, target) {
+      const osc = ctx.createOscillator();
+      const depth = ctx.createGain();
+      osc.frequency.value = speedHz;
+      depth.gain.value = amount;
+      osc.connect(depth);
+      depth.connect(target);
+      osc.start();
+    }
+
+    function pop(output) {
+      const length = Math.floor(ctx.sampleRate * 0.03);
+      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const tone = filter("bandpass", 1500 + Math.random() * 3500, 2);
+      const volume = ctx.createGain();
+      volume.gain.value = 0.4 + Math.random() * 1.2;
+      source.connect(tone);
+      tone.connect(volume);
+      volume.connect(output);
+      source.start();
+    }
+
+    function buildAudio() {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 0;
+      master.connect(ctx.destination);
+
+      const white = noiseBuffer("white");
+      const brown = noiseBuffer("brown");
+
+      CHANNELS.forEach(c => {
+        const out = ctx.createGain();
+        out.gain.value = levels[c.id] * levels[c.id] * c.trim;
+        out.connect(master);
+        gains[c.id] = out;
+      });
+
+      const rain = loop(white);
+      const rainHigh = filter("highpass", 1200);
+      const rainLow = filter("lowpass", 9000);
+      rain.connect(rainHigh); rainHigh.connect(rainLow); rainLow.connect(gains.rain);
+
+      const wind = loop(brown);
+      const windBand = filter("bandpass", 500, 0.7);
+      wind.connect(windBand); windBand.connect(gains.wind);
+      wobble(0.06, 300, windBand.frequency);
+
+      const waves = loop(brown);
+      const waveLow = filter("lowpass", 900);
+      const swell = ctx.createGain();
+      swell.gain.value = 0.5;
+      waves.connect(waveLow); waveLow.connect(swell); swell.connect(gains.waves);
+      wobble(0.1, 0.45, swell.gain);
+
+      const fire = loop(brown);
+      const fireLow = filter("lowpass", 250);
+      fire.connect(fireLow); fireLow.connect(gains.fire);
+      (function crackle() {
+        if (ctx.state === "running" && levels.fire > 0) pop(gains.fire);
+        setTimeout(crackle, 40 + Math.random() * 400);
+      })();
+    }
+
+    function setLevel(id, value) {
+      levels[id] = value;
+      if (ctx) {
+        const c = CHANNELS.find(x => x.id === id);
+        gains[id].gain.setTargetAtTime(value * value * c.trim, ctx.currentTime, 0.08);
+      }
+      saveLevels();
+      tintSky();
+    }
+
+    async function togglePlay() {
+      if (!ctx) buildAudio();
+      if (!playing) {
+        await ctx.resume();
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.setTargetAtTime(0.8, ctx.currentTime, 0.3);
+        playing = true;
+      } else {
+        master.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+        playing = false;
+        setTimeout(() => { if (!playing) ctx.suspend(); }, 1200);
+      }
+      const playBtn = document.getElementById("play");
+      playBtn.textContent = playing ? "Pause" : "Play";
+      playBtn.classList.toggle("on", playing);
+    }
+
+    function tintSky() {
+      const mix = [0, 1, 2].map(i => {
+        let v = BASE_SKY[i];
+        CHANNELS.forEach(c => { v += levels[c.id] * 0.16 * (c.color[i] - BASE_SKY[i]); });
+        return Math.round(Math.max(0, Math.min(255, v)));
+      });
+      document.body.style.backgroundColor = "rgb(" + mix.join(",") + ")";
+    }
+
+    let sleepEnd = null;
+    let selectedTimer = 0;
+
+    function setTimer(minutes) {
+      selectedTimer = minutes;
+      sleepEnd = minutes ? Date.now() + minutes * 60000 : null;
+      renderTimers();
+      document.getElementById("timeLeft").textContent = "";
+    }
+
+    setInterval(() => {
+      if (!sleepEnd) return;
+      const left = Math.round((sleepEnd - Date.now()) / 1000);
+      const label = document.getElementById("timeLeft");
+      if (left <= 0) {
+        sleepEnd = null;
+        selectedTimer = 0;
+        renderTimers();
+        label.textContent = "";
+        if (playing) togglePlay();
+        return;
+      }
+      if (left === 15 && playing) {
+        master.gain.setTargetAtTime(0, ctx.currentTime, 4);
+      }
+      label.textContent = "Stopping in " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+    }, 1000);
+
+    function renderChannels() {
+      const box = document.getElementById("channels");
+      CHANNELS.forEach(c => {
+        const row = document.createElement("div");
+        row.className = "channel";
+        row.style.background = "rgb(" + c.color.join(",") + ")";
+        row.style.color = c.ink;
+        row.innerHTML =
+          '<div class="channel-top"><span class="channel-name">' + c.name + '</span>' +
+          '<span class="channel-note">' + c.note + '</span></div>';
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = 0; slider.max = 1; slider.step = 0.01;
+        slider.value = levels[c.id];
+        slider.id = "slider-" + c.id;
+        slider.setAttribute("aria-label", c.name + " volume");
+        slider.addEventListener("input", () => setLevel(c.id, parseFloat(slider.value)));
+
+        row.appendChild(slider);
+        box.appendChild(row);
+      });
+    }
+
+    function renderPresets() {
+      const box = document.getElementById("presets");
+      Object.keys(PRESETS).forEach(name => {
+        const b = document.createElement("button");
+        b.className = "pill";
+        b.textContent = name;
+        b.onclick = () => {
+          CHANNELS.forEach(c => {
+            document.getElementById("slider-" + c.id).value = PRESETS[name][c.id];
+            setLevel(c.id, PRESETS[name][c.id]);
+          });
+        };
+        box.appendChild(b);
+      });
+    }
+
+    function renderTimers() {
+      const box = document.getElementById("timers");
+      box.innerHTML = "";
+      [[0, "Off"], [15, "15 min"], [30, "30 min"], [60, "1 hour"]].forEach(([mins, label]) => {
+        const b = document.createElement("button");
+        b.className = "pill" + (selectedTimer === mins ? " on" : "");
+        b.textContent = label;
+        b.onclick = () => setTimer(mins);
+        box.appendChild(b);
+      });
+    }
+
+    document.getElementById("play").onclick = togglePlay;
+    renderChannels();
+    renderPresets();
+    renderTimers();
+    tintSky();
+  </script>
+</body>
+  </html>
